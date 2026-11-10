@@ -7,7 +7,7 @@ def manhattan_heuristic(current, goal):
 
 
 
-def A_star(grid, start, goal):
+def A_star(start, goal, grid):
     start.g = 0
     start.f = manhattan_heuristic(start, goal)
     start.parent = None

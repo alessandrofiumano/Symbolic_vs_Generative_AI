@@ -1,7 +1,7 @@
 from pathfinding.core.diagonal_movement import DiagonalMovement
 from collections import deque
 
-def dfs(grid, start, goal):
+def dfs(start, goal, grid):
     start.g = 0
     start.f = 0
     start.parent = None
