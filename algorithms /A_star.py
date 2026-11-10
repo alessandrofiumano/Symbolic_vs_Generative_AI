@@ -39,3 +39,36 @@ def A_star(start, goal, grid):
                 frontier.append(child)
 
     return [], 0
+
+
+# def AStar(start, goal, grid, heuristic):
+#     start.g =0
+#     start.h = heuristic(start, goal)
+#     start.parent = None
+#     start.f = start.g + start.h
+#     frontier = [start]
+#     raggiunti = {(start.x, start.y): start}     # start è il primo in raggiunti
+#     while frontier:
+#         current = min (frontier, key = lambda node: node.f)
+#         frontier.remove(current)
+#
+#         # GOAL CHECK
+#         if current.x == goal.x and current.y == goal.y:
+#             path = []
+#             while current is not None:
+#                 path.append(current)
+#                 current = current.parent
+#             path.reverse()
+#             return path
+#
+#         successors = grid.neighbors(current, diagonal_movement=DiagonalMovement.never) # su, giù, dx, sx
+#         for succ in successors:
+#             newg = current.g +1
+#             if not (succ.x, succ.y) in raggiunti or newg < raggiunti[(succ.x, succ.y)].g:
+#                 succ.parent = current
+#                 succ.g = current.g+1        # aggiorno g, comune a tutti gli algoritmi
+#                 succ.h = heuristic(succ, goal)
+#                 succ.f = succ.g + succ.h
+#                 raggiunti[(succ.x, succ.y)] = succ
+#                 frontier.append(succ)
+#     return None
