@@ -1,4 +1,3 @@
-
 from pathfinding.core.diagonal_movement import DiagonalMovement
 from collections import deque
 
