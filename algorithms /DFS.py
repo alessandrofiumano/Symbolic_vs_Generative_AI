@@ -31,3 +31,25 @@ def dfs(start, goal, grid):
                 frontier.append(child)
 
     return [], 0
+
+
+# def DFS(start, goal, grid):
+#     start.parent = None
+#     frontier = [start]
+#     if start.x == goal.x and start.y == goal.y: # GOAL CHECK (POSTICIPATO)
+#         return [start]
+#     while frontier:
+#         current = frontier.pop()        # estrae l'ultimo
+#         if current.x == goal.x and current.y == goal.y:  # GOAL CHECK (POSTICIPATO)
+#             path = []
+#             while current is not None:
+#                 path.append(current)
+#                 current = current.parent
+#             path.reverse()
+#             return path
+#         successors = grid.neighbors(current, diagonal_movement=DiagonalMovement.never)  # su, giù, dx, sx
+#         for succ in successors:
+#             new_node = GridNode(succ.x, succ.y)
+#             new_node.parent = current
+#             frontier.append(new_node)
+#     return None
