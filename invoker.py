@@ -76,36 +76,42 @@ def get_successors(state):
 tools = [
     {
         "type": "function",
-        "function": {
-            "name": "get_environment",
-            "description": "Get the problem definition: initial state, goal, actions.",
-            "parameters": {"type": "object", "properties": {}}
+        "name": "get_environment",
+        "description": "Get the problem definition: initial state, goal, actions.",
+        "strict": True,
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False
         }
     },
     {
         "type": "function",
-        "function": {
-            "name": "get_successors",
-            "description": "Get all transitions from a state.",
-            "parameters": {
-                "type": "object",
-                "properties": {"state": {"type": "integer"}},
-                "required": ["state"]
-            }
+        "name": "get_successors",
+        "description": "Get all transitions from a state.",
+        "strict": True,
+        "parameters": {
+            "type": "object",
+            "properties": {"state": {"type": "integer"}},
+            "required": ["state"],
+            "additionalProperties": False
         }
     },
     {
         "type": "function",
-        "function": {
-            "name": "submit_solution",
-            "description": "Submit the final path as an ordered list of states, initial state to goal.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "array", "items": {"type": "integer"}}
-                },
-                "required": ["path"]
-            }
+        "name": "submit_solution",
+        "description": (
+            "Submit the final path as an ordered list of states, "
+            "initial state to goal."
+        ),
+        "strict": True,
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "array", "items": {"type": "integer"}}
+            },
+            "required": ["path"],
+            "additionalProperties": False
         }
     }
 ]
@@ -116,62 +122,51 @@ tools = [
 # ============================================================
 
 def run_search():
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": USER_PROMPT}
-    ]
+    next_input = [{"role": "user", "content": USER_PROMPT}]
+    previous_response_id = None
 
     for _ in range(MAX_ITERATIONS):
-
-        response = client.chat.completions.create(
+        response = client.responses.create(
             model=MODEL,
-            messages=messages,
+            instructions=SYSTEM_PROMPT,
+            input=next_input,
+            previous_response_id=previous_response_id,
             tools=tools,
-            tool_choice="required"
+            tool_choice="required",
+            store=True
         )
-        message = response.choices[0].message
 
-        messages.append({
-            "role": "assistant",
-            "content": message.content or "",
-            "tool_calls": [
-                {
-                    "id": tc.id,
-                    "type": "function",
-                    "function": {
-                        "name": tc.function.name,
-                        "arguments": tc.function.arguments
-                    }
-                }
-                for tc in message.tool_calls
-            ]
-        })
-
+        previous_response_id = response.id
+        next_input = []
         path = None
 
-        for tc in message.tool_calls:
-            args = json.loads(tc.function.arguments or "{}")
+        for call in response.output:
+            if call.type != "function_call":
+                continue
 
-            if tc.function.name == "get_environment":
+            args = json.loads(call.arguments or "{}")
+
+            if call.name == "get_environment":
                 result = get_environment()
-            elif tc.function.name == "get_successors":
+            elif call.name == "get_successors":
                 result = get_successors(args["state"])
-            elif tc.function.name == "submit_solution":
+            elif call.name == "submit_solution":
                 path = args["path"]
                 result = {"status": "received"}
             else:
                 result = {"error": "Unknown tool"}
 
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tc.id,
-                "content": json.dumps(result)
+            next_input.append({
+                "type": "function_call_output",
+                "call_id": call.call_id,
+                "output": json.dumps(result)
             })
 
         if path is not None:
             return path
 
     raise RuntimeError("Maximum iterations exceeded")
+
 
 
 # ============================================================

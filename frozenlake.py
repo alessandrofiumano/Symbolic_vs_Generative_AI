@@ -1,2 +1,2 @@
-from gymnasium import gym
+import gymnasium as gym
 
