@@ -1,20 +1,28 @@
-import os
 import json
-import time
 import gymnasium as gym
 from openai import OpenAI
+import subprocess
 
-
-# ============================================================
 # CONFIGURAZIONE
-# ============================================================
 
 client = OpenAI(
     base_url="http://127.0.0.1:1234/v1",
-    api_key="lmstudio"
+    api_key="lmstudio",
+    max_retries=0
 )
 
 MODEL = "google/gemma-4-12b-qat"
+
+
+SYSTEM_PROMPT = (
+    "Solve the problem using BFS, maintaining a queue, visited states "
+    "and the first parent of each discovered state. "
+    "Use only transitions returned by the tools. "
+    "Skip terminal successors unless they are the goal. "
+    "Consider actions in numerical order. Keep reasoning concise. "
+    "When the goal is discovered, reconstruct the path and immediately "
+    "call submit_solution. Do not repeatedly recheck the solution."
+)
 
 env = gym.make(
     "FrozenLake-v1",
@@ -23,43 +31,26 @@ env = gym.make(
     render_mode="human"
 )
 
-MAX_ITERATIONS = 100
 
-# Qui descrivi la strategia (BFS, DFS, ...) e le regole di tie-breaking
-SYSTEM_PROMPT = (
-    "You are a search agent. Solve the given search problem using BFS. "
-    "Use the tools to get the problem definition and the successors of states. "
-    "Do the search yourself, keeping frontier and visited states. "
-    "When finished, call submit_solution with the ordered list of states "
-    "from the initial state to the goal."
-)
-
-USER_PROMPT = "Solve the FrozenLake search problem."
-
-
-# ============================================================
-# FUNZIONI DELL'AMBIENTE
-# ============================================================
+# FUNZIONI ACCESSIBILI AL MODELLO
 
 def get_environment():
     return {
         "initial_state": 0,
         "goal_state": 15,
-        "num_states": int(env.observation_space.n),
+        "num_states": 16,
         "actions": {"0": "LEFT", "1": "DOWN", "2": "RIGHT", "3": "UP"},
         "step_cost": 1,
         "description": (
-            "4x4 grid, deterministic transitions. Some cells are holes "
-            "(terminal, to be avoided). Use get_successors to discover "
-            "transitions."
+            "Deterministic 4x4 grid. Terminal states other than the goal "
+            "are holes. Use get_successors to discover transitions."
         )
     }
 
 
 def get_successors(state):
-    state = int(state)
-    if not 0 <= state < env.observation_space.n:
-        return {"error": "Invalid state"}
+    if type(state) is not int or not 0 <= state < 16:
+        return {"error": "state must be an integer between 0 and 15"}
 
     successors = []
     for action, transitions in env.unwrapped.P[state].items():
@@ -75,164 +66,114 @@ def get_successors(state):
     return {"state": state, "successors": successors}
 
 
-# ============================================================
-# TOOL
-# ============================================================
-
+# Tools disponibili per il modello
 tools = [
     {
         "type": "function",
         "name": "get_environment",
-        "description": "Get the problem definition: initial state, goal, actions.",
-        "strict": True,
+        "description": "Get the initial state, goal and problem definition.",
+        "strict": False,
         "parameters": {
             "type": "object",
             "properties": {},
-            "additionalProperties": False
-        }
+        },
     },
     {
         "type": "function",
         "name": "get_successors",
         "description": "Get all transitions from a state.",
-        "strict": True,
+        "strict": False,
         "parameters": {
             "type": "object",
-            "properties": {"state": {"type": "integer"}},
-            "required": ["state"],
-            "additionalProperties": False
-        }
+            "properties": {
+                "state": {"type": "integer"},
+            },
+        },
     },
     {
         "type": "function",
         "name": "submit_solution",
-        "description": (
-            "Submit the final path as an ordered list of states, "
-            "initial state to goal."
-        ),
-        "strict": True,
+        "description": "Submit the ordered list of states from initial state to goal.",
+        "strict": False,
         "parameters": {
             "type": "object",
             "properties": {
-                "path": {"type": "array", "items": {"type": "integer"}}
+                "path": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                },
             },
-            "required": ["path"],
-            "additionalProperties": False
-        }
-    }
+        },
+    },
 ]
 
 
-# ============================================================
-# LOOP
-# ============================================================
+
+# RICERCA: IL MODELLO DECIDE, PYTHON ESEGUE LE FUNZIONI
 
 def run_search():
-    next_input = [{"role": "user", "content": USER_PROMPT}]
-    previous_response_id = None
+    inputs = [{"role": "user", "content": "Solve the FrozenLake problem."}]
+    previous_id = None
 
-    for _ in range(MAX_ITERATIONS):
+    functions = {
+        "get_environment": get_environment,
+        "get_successors": get_successors,
+    }
+
+    while True:
         response = client.responses.create(
             model=MODEL,
             instructions=SYSTEM_PROMPT,
-            input=next_input,
-            previous_response_id=previous_response_id,
+            input=inputs,
+            previous_response_id=previous_id,
             tools=tools,
-            tool_choice="required",
-            store=True
+            store=True,
         )
 
-        previous_response_id = response.id
-        next_input = []
-        path = None
+        print(response.output_text)
+
+        previous_id = response.id
+        inputs = []
 
         for call in response.output:
             if call.type != "function_call":
                 continue
 
-            args = json.loads(call.arguments or "{}")
+            print(f"{call.name}({call.arguments})")
+            args = json.loads(call.arguments)
 
-            if call.name == "get_environment":
-                result = get_environment()
-            elif call.name == "get_successors":
-                result = get_successors(args["state"])
-            elif call.name == "submit_solution":
-                path = args["path"]
-                result = {"status": "received"}
-            else:
-                result = {"error": "Unknown tool"}
+            if call.name == "submit_solution":
+                return args["path"]
 
-            next_input.append({
+            result = functions[call.name](**args)
+            print(f"Risultato: {result}")
+
+            inputs.append({
                 "type": "function_call_output",
                 "call_id": call.call_id,
-                "output": json.dumps(result)
+                "output": json.dumps(result),
             })
 
-        if path is not None:
-            return path
-
-    raise RuntimeError("Maximum iterations exceeded")
+        if not inputs:
+            return response.output_text
 
 
-
-# ============================================================
 # MAIN
-# ============================================================
 
 if __name__ == "__main__":
     try:
         path = run_search()
-        print("Path:", path)
+        print("Percorso del modello:", path)
 
-        with open("llm_result.json", "w") as f:
-            json.dump({"path": path}, f, indent=2)
+        with open("llm_result.json", "w", encoding="utf-8") as file:
+            json.dump({"path": path}, file, indent=2)
 
-        # Reset mostra anche la finestra grafica.
-        state, _ = env.reset()
-
-        if not path or path[0] != state:
-            raise ValueError(
-                f"Il percorso deve iniziare dallo stato {state}"
-            )
-
-        time.sleep(1)
-
-        for expected_state in path[1:]:
-            # Cerca un'azione che conduca allo stato indicato.
-            action = next(
-                (
-                    action
-                    for action, transitions in env.unwrapped.P[state].items()
-                    if any(
-                        probability == 1.0 and next_state == expected_state
-                        for probability, next_state, _, _ in transitions
-                    )
-                ),
-                None
-            )
-
-            if action is None:
-                raise ValueError(
-                    f"Transizione impossibile: {state} -> {expected_state}"
-                )
-
-            state, reward, terminated, truncated, _ = env.step(action)
-            print(f"Azione: {action}, stato: {state}, reward: {reward}")
-            time.sleep(0.7)
-
-            if state != expected_state:
-                raise RuntimeError("Lo stato raggiunto non coincide con il percorso")
-
-            if terminated or truncated:
-                break
-
-        if state == 15 and terminated and reward > 0:
-            print("Obiettivo raggiunto!")
-        else:
-            print("Il percorso non ha raggiunto l'obiettivo.")
-
-        time.sleep(2)
 
     finally:
         env.close()
-
+        client.close()
+        subprocess.run(
+            ["lms", "unload", MODEL],
+            check=True,
+            timeout=30,
+        )
