@@ -1,6 +1,6 @@
 import os
 import json
-
+import time
 import gymnasium as gym
 from openai import OpenAI
 
@@ -10,12 +10,18 @@ from openai import OpenAI
 # ============================================================
 
 client = OpenAI(
-    base_url=os.environ["LLM_BASE_URL"],
-    api_key=os.environ["LLM_API_KEY"]
+    base_url="http://127.0.0.1:1234/v1",
+    api_key="lmstudio"
 )
-MODEL = os.environ["LLM_MODEL"]
 
-env = gym.make("FrozenLake-v1", map_name="4x4", is_slippery=False)
+MODEL = "google/gemma-4-12b-qat"
+
+env = gym.make(
+    "FrozenLake-v1",
+    map_name="4x4",
+    is_slippery=False,
+    render_mode="human"
+)
 
 MAX_ITERATIONS = 100
 
@@ -174,10 +180,59 @@ def run_search():
 # ============================================================
 
 if __name__ == "__main__":
-    path = run_search()
-    print("Path:", path)
+    try:
+        path = run_search()
+        print("Path:", path)
 
-    with open("llm_result.json", "w") as f:
-        json.dump({"path": path}, f, indent=2)
+        with open("llm_result.json", "w") as f:
+            json.dump({"path": path}, f, indent=2)
 
-    env.close()
+        # Reset mostra anche la finestra grafica.
+        state, _ = env.reset()
+
+        if not path or path[0] != state:
+            raise ValueError(
+                f"Il percorso deve iniziare dallo stato {state}"
+            )
+
+        time.sleep(1)
+
+        for expected_state in path[1:]:
+            # Cerca un'azione che conduca allo stato indicato.
+            action = next(
+                (
+                    action
+                    for action, transitions in env.unwrapped.P[state].items()
+                    if any(
+                        probability == 1.0 and next_state == expected_state
+                        for probability, next_state, _, _ in transitions
+                    )
+                ),
+                None
+            )
+
+            if action is None:
+                raise ValueError(
+                    f"Transizione impossibile: {state} -> {expected_state}"
+                )
+
+            state, reward, terminated, truncated, _ = env.step(action)
+            print(f"Azione: {action}, stato: {state}, reward: {reward}")
+            time.sleep(0.7)
+
+            if state != expected_state:
+                raise RuntimeError("Lo stato raggiunto non coincide con il percorso")
+
+            if terminated or truncated:
+                break
+
+        if state == 15 and terminated and reward > 0:
+            print("Obiettivo raggiunto!")
+        else:
+            print("Il percorso non ha raggiunto l'obiettivo.")
+
+        time.sleep(2)
+
+    finally:
+        env.close()
+
